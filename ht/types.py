@@ -69,14 +69,15 @@ class Path(Generic[A]):
         self.source = source
         self.target = target
 
+    # return A or Path or Path[A] ?
     @staticmethod
-    def refl(a: A) -> "Path[A]":
+    def refl(a: A) -> A:
         return Path(a, a)
 
-    def sym(self) -> "Path[A]":
+    def sym(self) -> A:
         return Path(self.target, self.source)
 
-    def trans(self, other: "Path[A]") -> "Path[A]":
+    def trans(self, other: A) -> A:
         if self.target != other.source:
             raise ValueError("Paths are not composable")
         return Path(self.source, other.target)
