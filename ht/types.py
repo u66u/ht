@@ -1,13 +1,12 @@
-from typing import Any, Callable, TypeVar, Generic, Protocol
+from typing import Any, Callable, TypeVar, Generic, Protocol, Union
 from abc import ABC, abstractmethod
 
+T = TypeVar("T", bound="Type")
+U = TypeVar("U", bound="Type")
 
-T = TypeVar("T", bound=Type)
-U = TypeVar("U", bound=Type)
-
-A = TypeVar("A", bound=Type)
-B = TypeVar("B", bound=Type)
-C = TypeVar("C", bound=Type)
+A = TypeVar("A", bound="Type")
+B = TypeVar("B", bound="Type")
+C = TypeVar("C", bound="Type")
 
 
 class Term(ABC):
@@ -19,64 +18,79 @@ class Type(Term):
 
 
 class Path(Generic[A], Type):
-    def __init__(self, A: Type, x: Term, y: Term):
+    def __init__(self, A: "Type", x: Term, y: Term):
         self.A = A
         self.x = x
         self.y = y
 
-def refl(A: Type, a: Term) -> Path[A]:
+
+def refl(A: "Type", a: Term) -> "Path[Any]":
     return Path(A, a, a)
 
-def J(A: Type, C: Callable[[Term, Term, Path], Type], 
-      d: Callable[[Term], Term], 
-      x: Term, y: Term, p: Path[A]) -> Term:
+
+def J(
+    A: "Type",
+    C: Callable[[Term, Term, "Path[Any]"], "Type"],
+    d: Callable[[Term], "Path[Any]"],
+    x: Term,
+    y: Term,
+    p: "Path[Any]",
+) -> "Path[Any]":
+    # In a full implementation, it would handle the computation rule
     raise NotImplementedError("J eliminator not fully implemented")
 
-def sym(A: Type, x: Term, y: Term, p: Path[A]) -> Path[A]:
-    def C(_x: Term, _y: Term, _p: Path[A]) -> Type:
+
+def sym(A: "Type", x: Term, y: Term, p: "Path[Any]") -> "Path[Any]":
+    def C(_x: Term, _y: Term, _p: "Path[Any]") -> "Type":
         return Path(A, _y, _x)
+
     return J(A, C, lambda z: refl(A, z), x, y, p)
 
-def trans(A: Type, x: Term, y: Term, z: Term, p: Path[A], q: Path[A]) -> Path[A]:
-    def C(_y: Term, _: Path[A]) -> Type:
+
+def trans(
+    A: "Type", x: Term, y: Term, z: Term, p: "Path[Any]", q: "Path[Any]"
+) -> "Path[Any]":
+    def C(_x: Term, _y: Term, _: "Path[Any]") -> "Type":
         return Path(A, x, _y)
+
     return J(A, C, lambda _: p, y, z, q)
 
 
 class Unit(Type):
-    star: Term = object()  # A single inhabitant of Unit
+    star: Term = Term()  # A single inhabitant of Unit
 
     def __eq__(self, other: Any) -> bool:
         return isinstance(other, Unit)
 
 
 class DependentType(Protocol[A]):
-    def __call__(self, x: A, p: Path[A]) -> Type: ...
+    def __call__(self, x: A, p: "Path[A]") -> "Type": ...
 
 
 class Bool(Type):
-    true: Term = object()
-    false: Term = object()
-
     def __init__(self, value: bool):
-        self.value = self.true if value else self.false
+        self.value = value
 
     def __eq__(self, other: Any) -> bool:
-        return isinstance(other, Bool) and self.value is other.value
+        return isinstance(other, Bool) and self.value == other.value
 
-    def __bool__(self):
-        return self.value is self.true
+    def __call__(self) -> bool:
+        return self.value
+
+    def __bool__(self) -> bool:
+        return self.value
 
 
 class Function(Type):
-    def __init__(self, domain: Type, codomain: Type, impl: Callable[[Any], Any]):
+    def __init__(self, domain: "Type", codomain: "Type", impl: Callable[[Any], Any]):
         self.domain = domain
         self.codomain = codomain
         self.impl = impl
 
-    def __call__(self, x: Term) -> Type:
-        return self.codomain(x)
-
+    def __call__(self, x: Any) -> Any:
+        if isinstance(x, Bool):
+            return Bool(self.impl(x.value))
+        return self.impl(x)
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, Function):
@@ -84,36 +98,8 @@ class Function(Type):
         return self.domain == other.domain and self.codomain == other.codomain
 
 
-class Pi(Type, Generic[A, B]):
-    def __init__(self, domain: Type, codomain: Callable[[Term], Type]):
-        self.domain = domain
-        self.codomain = codomain
-
-    def __call__(self, x: Any) -> B:
-        return self.codomain(x)
-
-    def __eq__(self, other: Any) -> bool:
-        return (
-            isinstance(other, Pi)
-            and self.domain == other.domain
-            and all(self.codomain(x) == other.codomain(x) for x in self.domain)  # TODO
-        )
-
-
-class DependentFunction(Term):
-    def __init__(self, pi_type: Pi, impl: Callable[[Term], Term]):
-        self.pi_type = pi_type
-        self.impl = impl
-
-    def __call__(self, x: Term) -> Term:
-        return self.impl(x)
-
-    def dependent_apply(f: DependentFunction, x: Term) -> Term:
-        return f(x)
-
-
 class Identity(Type):
-    def __init__(self, A: Type, x: Any, y: Any):
+    def __init__(self, A: "Type", x: Any, y: Any):
         self.A = A
         self.x = x
         self.y = y
@@ -139,13 +125,13 @@ class QuasiInverse:
 
 
 class Equivalence(Type):
-    def __init__(self, A: Type, B: Type, quasi_inverse: QuasiInverse):
+    def __init__(self, A: "Type", B: "Type", quasi_inverse: QuasiInverse):
         self.A = A
         self.B = B
         self.quasi_inverse = quasi_inverse
 
-    def to_path(self) -> Path:
-        return Path(self.A, self.B)
+    def to_path(self) -> "Path[Any]":
+        return Path(self.A, self.B, self)
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, Equivalence):
@@ -158,12 +144,29 @@ class Equivalence(Type):
         )
 
 
+class Pi(Type, Generic[A, B]):
+    def __init__(self, domain: "Type", codomain: Callable[[Term], "Type"]):
+        self.domain = domain
+        self.codomain = codomain
 
-def ap(f: Callable[[A], B], p: Path[A]) -> Path[B]:
-    return Path(f(p.source), f(p.target))
+    def __call__(self, x: Any) -> "Type":
+        return self.codomain(x)
+
+    def __eq__(self, other: Any) -> bool:
+        return (
+            isinstance(other, Pi)
+            and self.domain == other.domain
+            and all(
+                self.codomain(x) == other.codomain(x) for x in []
+            )  # TODO: Proper iteration
+        )
 
 
-def id_function(A: Type) -> Function:
+def ap(f: Callable[[Any], Any], p: "Path[Any]") -> "Path[Any]":
+    return Path(f(p.A), f(p.x), f(p.y))
+
+
+def id_function(A: "Type") -> Function:
     return Function(A, A, lambda x: x)
 
 
@@ -172,8 +175,10 @@ def compose_functions(f: Function, g: Function) -> Function:
         raise ValueError("Functions are not composable")
     return Function(f.domain, g.codomain, lambda x: g(f(x)))
 
-def lambda_abstraction(A: Type, f: Callable[[Term], Term]) -> Term:
-    return f  # siimplified, we'd need to handle scope and evaluation
 
-def apply(f: Term, x: Term) -> Term:
+def lambda_abstraction(A: "Type", f: Callable[[Term], Term]) -> Callable[[Term], Term]:
+    return f  # simplified, we'd need to handle scope and evaluation
+
+
+def apply(f: Callable[[Term], Term], x: Term) -> Term:
     return f(x)  # simplification
